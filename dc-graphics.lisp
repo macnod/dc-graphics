@@ -1,47 +1,54 @@
 (in-package :dc-graphics)
 
-(defun line-chart (width height series)
+(defun line-chart (point-series &key (width 640) 
+                                  (height 400)
+                                  (margin-left 25)
+                                  (margin-right 25)
+                                  (margin-top 25)
+                                  (margin-bottom 25)
+                                  series-labels)
   (let* ((file "/tmp/chart.png")
-         (x-min (series-point-extreme series 1 #'<))
-         (x-max (series-point-extreme series 1 #'>))
-         (y-min (series-point-extreme series 2 #'<))
-         (y-max (series-point-extreme series 2 #'>))
+         (x-min (point-series-extreme point-series :x #'<))
+         (x-max (point-series-extreme point-series :x #'>))
+         (y-min (point-series-extreme point-series :y #'<))
+         (y-max (point-series-extreme point-series :y #'>))
          (w (- x-max x-min))
          (h (- y-max y-min))
-         (a-margin-left 50)
-         (a-margin-right 50)
-         (a-margin-top 50)
-         (a-margin-bottom 50)
-         (a-width (- width a-margin-left a-margin-right))
-         (a-height (- height a-margin-top a-margin-bottom))
-         (dx (/ a-width w))
-         (dy (/ a-height h)))
+         (a-width (- width margin-left margin-right))
+         (a-height (- height margin-top margin-bottom))
+         (actual (lambda (x y)
+                   (list
+                    (+ (* (/ (- x x-min) w) a-width) margin-left)
+                    (+ (* (/ (- y y-min) h) a-height) margin-bottom))))
+         (colors (loop for index from 1 to (length point-series)
+                    collect (get-color index))))
       (with-canvas (:width width :height height)
         (set-line-width 2)
         (set-rgb-stroke 0.5 0.5 0.5)
         (rectangle 0 0 width height)
         (stroke)
         (set-rgb-stroke 0.5 0.5 1.0)
-        (rectangle a-margin-left a-margin-bottom a-width a-height)
+        (rectangle margin-left margin-bottom a-width a-height)
         (stroke)
-        (loop for s in series
-           for row = 1 then (1+ row)
-           for color = (get-color row)
+        (when series-labels (render-color-legend series-labels colors))
+        (loop for s in point-series
+           for color in colors
            do
              (apply #'set-rgb-stroke color)
-             (loop for x-old = nil then x-new
-                for y-old = nil then y-new
+             (loop for x-old = nil then (car xy)
+                for y-old = nil then (second xy)
                 for (x y) in s
-                for x-new = (+ (* x dx) a-margin-left)
-                for y-new = (+ (* y dy) a-margin-bottom)
+                for xy = (funcall actual x y)
                 when x-old do
                   (move-to x-old y-old)
-                  (line-to x-new y-new)
+                  (line-to (car xy) (second xy))
                   (stroke)))
         (save-png file))
-      file))
+      (list :file file :x-min x-min :x-max x-max :y-min y-min :y-max y-max)))
 
-(defun series-point-extreme (series point-dimension function)
+(defun render-color-legend (
+
+(defun point-series-extreme (series point-dimension function)
   (loop with x = nil
      with dim = (if (eql point-dimension :x) 0 1)
      for s in series do
@@ -51,20 +58,24 @@
           do (setf x value))
      finally (return x)))
 
-(defun bogus-series (&key (row-count 3) (row-length 10) 
-                       (min-value 0.0) (max-value 10.0))
-  (loop with dx = (/ pi (float row-length))
-     with value-range = (/ (- max-value min-value) 2)
-     for row from 1 to row-count
-     collect (loop for column from 0 below row-length
-                for x = (/ pi row) then (+ x dx)
-                for value = (truncate (+ (* (sin x) value-range) value-range))
-                collect (list column value))))
+(defun make-point-series (&key (begin 0) 
+                            (end (* 2 pi))
+                            (step (/ (* 2 pi) 100.0))
+                            (function #'sin)
+                            (max 5) (min -5))
+  (let ((functions (if (listp function) function (list function))))
+    (loop for function in functions collect
+         (loop for x from begin to end by step
+            for y = (max min (min max (funcall function x)))
+            collect (list x y)))))
 
-(defun list-to-series (list)
-  (loop for x = 0 then (1+ x)
-     for y in list
-     collect (list x y)))
+(defun list-to-point-series (list)
+  (list (loop for y in list 
+           for x = 0 then (1+ x)
+           collect (list x y))))
+
+(defun lists-to-point-series (lists)
+  (loop for list in lists collect (car (list-to-point-series list))))
 
 (defun get-color (i)
   (case i
